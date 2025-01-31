@@ -1,0 +1,16 @@
+curl -X POST http://localhost:8080/scan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo": "https://github.com/velancio/vulnerability_scans",
+    "files": ["vulnscan16.json"]
+  }'
+
+
+
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filters": {
+      "severity": "HIGH"
+    }
+  }'
