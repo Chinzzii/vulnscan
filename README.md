@@ -2,7 +2,7 @@
 
 A Go service for scanning GitHub repositories for vulnerability reports and querying stored data via REST APIs.
 
----
+
 
 ## Features
 
@@ -13,7 +13,7 @@ A Go service for scanning GitHub repositories for vulnerability reports and quer
 - SQLite database backend
 - Docker support
 
----
+
 
 ## Project Structure
 
@@ -34,7 +34,7 @@ vulnscan/
 └── Dockerfile      # Containerization configuration
 ```
 
----
+
 
 ## API Endpoints
 
@@ -43,6 +43,7 @@ vulnscan/
 **POST /scan**: Scan a GitHub repository for vulnerability reports
 
 **Example**:
+
 Request:
 ```json
 {
@@ -64,6 +65,7 @@ Response:
 **POST /query**: Query stored vulnerabilities by severity level
 
 **Example**:
+
 Request:
 ```json
 {
@@ -98,7 +100,7 @@ Response:
 ]
 ```
 
----
+
 
 ## Prerequisites
 
@@ -107,7 +109,7 @@ Response:
 - Git
 - Docker (optional)
 
----
+
 
 ## Setup & Installation
 
@@ -127,7 +129,7 @@ go mod download
 go build -o vulnscan
 ```
 
----
+
 
 ## Running the Service
 
@@ -153,7 +155,7 @@ docker build -t vulnscan .
 docker run -p 8080:8080 vulnscan
 ```
 
----
+
 
 ## Testing
 
@@ -242,7 +244,7 @@ curl -X POST http://localhost:8080/query \
 
 ...
 
----
+
 
 ## Contributing
 
