@@ -5,14 +5,18 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// DB is the global database connection handle
 var DB *sqlx.DB
 
+// InitDB initializes the SQLite database connection and schema
 func InitDB() error {
+	// Open database connection with Write-Ahead Logging for better concurrency
 	db, err := sqlx.Open("sqlite3", "vulnerabilities.db?_journal=WAL")
 	if err != nil {
 		return err
 	}
 
+	// Create tables if they do not exist
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS scans (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
