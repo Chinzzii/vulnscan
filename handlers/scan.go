@@ -3,13 +3,15 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/Chinzzii/vulnscan/github"
 	"github.com/Chinzzii/vulnscan/models"
 	"github.com/Chinzzii/vulnscan/storage"
+	"github.com/jmoiron/sqlx"
 )
 
 // ScanRequest defines the expected request structure for /scan endpoint
@@ -76,68 +78,154 @@ func ScanHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ScanResponse{Success: success, Failed: failed})
 }
 
-// processFile handles individual file processing pipeline
+// processFile handles individual file processing pipeline with retries
 func processFile(repo, filePath string) error {
-	// Step 1: Fetch file content from GitHub with retries
-	content, err := github.FetchFileContent(repo, filePath)
+	const maxRetries = 2
+	var lastErr error
+
+	// Retry loop with maxRetries attempts
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		}
+		
+		err := processFileWithRetry(repo, filePath)
+		if err == nil {
+			return nil
+		}
+
+		// Check for lock errors and retry
+		if isLockError(err) {
+			lastErr = err
+			continue
+		}
+		return err
+	}
+
+	return fmt.Errorf("failed after %d attempts: %v", maxRetries, lastErr)
+}
+
+// processFileWithRetry handles individual file processing pipeline
+func processFileWithRetry(repo, filePath string) error {
+	content, err := FetchFileContent(repo, filePath)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %v", err)
 	}
 
-	// Step 2: Parse JSON content into structured data
+	// Unmarshal JSON content
 	var scanFiles []models.ScanFile
 	if err := json.Unmarshal(content, &scanFiles); err != nil {
 		return fmt.Errorf("invalid JSON: %v", err)
 	}
 
-	// Step 3: Begin database transaction
+	// Insert scan results into database
+	return executeInTransaction(func(tx *sqlx.Tx) error {
+		scanTime := time.Now().UTC()
+
+		for _, sf := range scanFiles {
+			sr := sf.ScanResults
+
+			res, err := tx.Exec(
+				"INSERT INTO scans (repo, file_path, scan_time, scan_id, timestamp) VALUES (?, ?, ?, ?, ?)",
+				repo, filePath, scanTime, sr.ScanID, sr.Timestamp,
+			)
+			if err != nil {
+				return fmt.Errorf("insert scan failed: %v", err)
+			}
+
+			scanID, err := res.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("get scan ID failed: %v", err)
+			}
+
+			for _, vuln := range sr.Vulnerabilities {
+				_, err := tx.Exec(`INSERT INTO vulnerabilities (
+					scan_id, cve_id, severity, cvss, status, package_name, 
+					current_version, fixed_version, description, 
+					published_date, link, risk_factors
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					scanID, vuln.CVEID, vuln.Severity, vuln.CVSS, vuln.Status,
+					vuln.PackageName, vuln.CurrentVersion, vuln.FixedVersion,
+					vuln.Description, vuln.PublishedDate, vuln.Link, vuln.RiskFactors,
+				)
+				if err != nil {
+					return fmt.Errorf("insert vulnerability failed: %v", err)
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// executeInTransaction executes a function within a database transaction
+func executeInTransaction(fn func(*sqlx.Tx) error) error {
+	// Start transaction
 	tx, err := storage.DB.Beginx()
 	if err != nil {
 		return fmt.Errorf("db transaction failed: %v", err)
 	}
-	defer tx.Rollback() // Rollback transaction if not committed
 
-	scanTime := time.Now().UTC()
-
-	// Step 4: Process each scan result in the file
-	for _, sf := range scanFiles {
-		sr := sf.ScanResults
-
-		// Insert scan metadata
-		res, err := tx.Exec(
-			"INSERT INTO scans (repo, file_path, scan_time, scan_id, timestamp) VALUES (?, ?, ?, ?, ?)",
-			repo, filePath, scanTime, sr.ScanID, sr.Timestamp,
-		)
-		if err != nil {
-			return fmt.Errorf("insert scan failed: %v", err)
+	// Rollback transaction on panic
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
 		}
+	}()
 
-		// Get auto-generated scan ID
-		scanID, err := res.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("get scan ID failed: %v", err)
-		}
-
-		// Insert vulnerabilities
-		for _, vuln := range sr.Vulnerabilities {
-			_, err := tx.Exec(`INSERT INTO vulnerabilities (
-				scan_id, cve_id, severity, cvss, status, package_name, 
-				current_version, fixed_version, description, 
-				published_date, link, risk_factors
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				scanID, vuln.CVEID, vuln.Severity, vuln.CVSS, vuln.Status,
-				vuln.PackageName, vuln.CurrentVersion, vuln.FixedVersion,
-				vuln.Description, vuln.PublishedDate, vuln.Link, vuln.RiskFactors,
-			)
-			if err != nil {
-				return fmt.Errorf("insert vulnerability failed: %v", err)
-			}
-		}
+	// Execute function within transaction
+	if err := fn(tx); err != nil {
+		tx.Rollback()
+		return err
 	}
 
-	// Step 5: Commit transaction
+	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit failed: %v", err)
 	}
 	return nil
+}
+
+// isLockError checks if the error is due to database lock contention
+func isLockError(err error) bool {
+	return strings.Contains(err.Error(), "locked") ||
+		strings.Contains(err.Error(), "busy")
+}
+
+// FetchFileContent retrieves file contents from GitHub with retries
+func FetchFileContent(repo, filePath string) ([]byte, error) {
+
+	// Convert GitHub repository URL to raw content URL
+	repo = strings.TrimSuffix(repo, "/")
+	rawURL := strings.Replace(repo, "github.com", "raw.githubusercontent.com", 1) + "/main/" + filePath
+
+	var body []byte
+	var err error
+
+	// Retry loop with 2 attempts
+	for attempt := 0; attempt < 2; attempt++ {
+		var resp *http.Response
+		resp, err = http.Get(rawURL)
+		if err != nil {
+			time.Sleep(time.Second * time.Duration(attempt+1))
+			continue
+		}
+		defer resp.Body.Close()
+
+		// Check for valid response
+		if resp.StatusCode != http.StatusOK {
+			err = fmt.Errorf("HTTP status %d", resp.StatusCode)
+			time.Sleep(time.Second * time.Duration(attempt+1))
+			continue
+		}
+
+		// Read response body
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			time.Sleep(time.Second * time.Duration(attempt+1))
+			continue
+		}
+		return body, nil
+	}
+	return nil, fmt.Errorf("failed after 2 attempts: %v", err)
 }
