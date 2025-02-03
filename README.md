@@ -162,6 +162,21 @@ docker run -p 8080:8080 vulnscan
 
 ## Testing
 
+#### Automated Testing
+
+```bash
+# Run all tests with verbose output
+go test -v ./tests/...
+
+# Run specific test suites
+go test -v ./tests/scan/scan_handler_test.go    # Scan endpoint unit tests
+go test -v ./tests/query/query_handler_test.go  # Query endpoint unit tests
+
+# Run with coverage report
+go test -v -coverprofile=coverage.out ./tests/...
+go tool cover -html=coverage.out -o coverage.html
+```
+
 #### Manual Test
 
 Follow these steps to verify the service functionality:
@@ -241,21 +256,6 @@ curl -X POST http://localhost:8080/query \
     ]
   }
 ]
-```
-
-#### Automated Testing
-
-```bash
-# Run all tests with verbose output
-go test -v ./tests/...
-
-# Run specific test suites
-go test -v ./tests/scan/scan_handler_test.go    # Scan endpoint unit tests
-go test -v ./tests/query/query_handler_test.go  # Query endpoint unit tests
-
-# Run with coverage report
-go test -v -coverprofile=coverage.out ./tests/...
-go tool cover -html=coverage.out -o coverage.html
 ```
 
 ## Contributing
