@@ -22,12 +22,15 @@ vulnscan/
 ├── handlers/       # API endpoint handlers
 │ ├── scan.go       # Scan endpoint implementation
 │ └── query.go      # Query endpoint implementation
-├── github/         # GitHub client
-│ └── client.go
 ├── models/         # Data models and database schema
 │ └── models.go
 ├── storage/        # Database initialization and management
 │ └── db.go
+├── tests/          # Unit tests for handlers
+│ └── query
+│   └── query_handler_test.go
+│ └── scan
+│   └── scan_handler_test.go
 ├── main.go         # Application entry point
 ├── go.mod          # Go module dependencies
 ├── go.sum          # Dependency checksums
@@ -242,9 +245,18 @@ curl -X POST http://localhost:8080/query \
 
 #### Automated Testing
 
-...
+```bash
+# Run all tests with verbose output
+go test -v ./tests/...
 
+# Run specific test suites
+go test -v ./tests/scan/scan_handler_test.go    # Scan endpoint unit tests
+go test -v ./tests/query/query_handler_test.go  # Query endpoint unit tests
 
+# Run with coverage report
+go test -v -coverprofile=coverage.out ./tests/...
+go tool cover -html=coverage.out -o coverage.html
+```
 
 ## Contributing
 

@@ -1,3 +1,6 @@
 vulnerabilities.db
 vulnerabilities.db-shm
 vulnerabilities.db-wal
+cover.out
+coverage.html
+coverage.out
